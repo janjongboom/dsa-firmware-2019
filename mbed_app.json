@@ -9,6 +9,7 @@
             "mbed-trace.enable": true,
             "lora.phy": "EU868",
             "target.tickless-from-us-ticker": false,
+            "target.components_add": ["SPIF"],
             "target.macros_add": [
                 "MBED_CONF_TARGET_STDIO_UART_TX=PA_9",
                 "MBED_CONF_TARGET_STDIO_UART_RX=PA_10"
