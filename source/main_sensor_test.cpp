@@ -1,3 +1,6 @@
+#include "select_app.h"
+#if APPLICATION == SENSOR_TEST
+
 #include "mbed.h"
 #include "lora_radio_helper.h"
 #include "HTS221Sensor.h"
@@ -146,3 +149,5 @@ int main() {
 
     queue.dispatch_forever();
 }
+
+#endif // APPLICATION == SENSOR_TEST
