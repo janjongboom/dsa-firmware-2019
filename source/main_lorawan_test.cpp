@@ -17,7 +17,7 @@ static uint8_t APP_KEY[] = { 0x7C, 0x85, 0x17, 0xDB, 0x19, 0x2B, 0xD2, 0x14, 0xE
 
 // Peripherals (LoRa radio, temperature sensor and button)
 static InterruptIn btn1(PD_8);
-static DigitalOut led1(PA_5);
+static DigitalOut led1(PA_5, 1);
 static DevI2C dev_i2c(PB_9, PB_8);
 static HTS221Sensor hts221(&dev_i2c);
 
@@ -32,6 +32,31 @@ static lorawan_app_callbacks_t callbacks;
 
 // LoRaWAN stack event handler
 static void lora_event_handler(lorawan_event_t event);
+
+static void print_stats() {
+    // allocate enough room for every thread's stack statistics
+    int cnt = osThreadGetCount();
+    mbed_stats_stack_t *stats = (mbed_stats_stack_t*) malloc(cnt * sizeof(mbed_stats_stack_t));
+
+    cnt = mbed_stats_stack_get_each(stats, cnt);
+    for (int i = 0; i < cnt; i++) {
+        printf("Thread: 0x%lX, Stack size: %lu / %lu\r\n", stats[i].thread_id, stats[i].max_size, stats[i].reserved_size);
+    }
+    free(stats);
+
+    // Grab the heap statistics
+    mbed_stats_heap_t heap_stats;
+    mbed_stats_heap_get(&heap_stats);
+    printf("Heap size: %lu / %lu bytes\r\n", heap_stats.current_size, heap_stats.reserved_size);
+
+    mbed_stats_cpu_t cpu_stats;
+    mbed_stats_cpu_get(&cpu_stats);
+    printf("Uptime: %llu ", cpu_stats.uptime / 1000);
+    printf("Sleep time: %llu ", cpu_stats.sleep_time / 1000);
+    printf("Deep Sleep: %llu\n", cpu_stats.deep_sleep_time / 1000);
+
+    printf("\r\n");
+}
 
 // Send a message over LoRaWAN
 static void send_message() {
@@ -58,6 +83,7 @@ static void send_message() {
     }
 
     printf("%d bytes scheduled for transmission\n", retcode);
+    print_stats();
 }
 
 int main() {
@@ -72,7 +98,8 @@ int main() {
     }
 
     // Fire a message when the button is pressed
-    btn1.fall(ev_queue.event(&send_message));
+    ev_queue.call_every(10000, &send_message);
+    // btn1.fall(ev_queue.event(&send_message));
 
     // prepare application callbacks
     callbacks.events = mbed::callback(lora_event_handler);
