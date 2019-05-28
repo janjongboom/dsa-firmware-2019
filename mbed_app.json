@@ -8,12 +8,14 @@
             "platform.sys-stats-enabled": 1,
             "mbed-trace.enable": true,
             "lora.phy": "EU868",
+            "sx1276-lora-driver.radio-variant": "SX1276MB1MAS",
             "target.tickless-from-us-ticker": false,
             "target.components_add": ["SPIF"],
             "target.macros_add": [
                 "MBED_CONF_TARGET_STDIO_UART_TX=PA_9",
                 "MBED_CONF_TARGET_STDIO_UART_RX=PA_10"
-            ]
+            ],
+            "target.lpticker_lptim_clock": 4
         }
     },
     "macros": [
