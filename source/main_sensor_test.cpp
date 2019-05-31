@@ -2,32 +2,7 @@
 #if APPLICATION == SENSOR_TEST
 
 #include "mbed.h"
-#include "lora_radio_helper.h"
-#include "HTS221Sensor.h"
-#include "LPS22HBSensor.h"
-#include "TSL2572Sensor.h"
-#include "SPIFBlockDevice.h"
-#include "DavisAnemometer.h"
-
-// Peripherals
-static DigitalOut led1(PA_5);
-static DigitalOut led2(PA_6);
-
-static InterruptIn btn1(PD_8);
-static InterruptIn btn2(PD_9);
-
-static DevI2C dev_i2c(PB_9, PB_8);
-static HTS221Sensor hts221(&dev_i2c);
-static LPS22HBSensor lps22hb(&dev_i2c, LPS22HB_ADDRESS_LOW);
-static TSL2572Sensor tsl2572(PB_9, PB_8);
-
-static AnalogIn grove12_7(PA_2);   // marked as ADC12.7
-static AnalogIn grove12_8(PA_3);   // marked as ADC12.8
-
-static DavisAnemometer anemometer(PA_1, PD_4);
-
-// Block device
-static SPIFBlockDevice bd(PB_5, PB_4, PB_3, PE_12);
+#include "peripherals.h"
 
 void btn1_fall() {
     led1 = !led1;
@@ -67,6 +42,10 @@ void print_stats() {
 }
 
 void print_sensor_data() {
+    hts221.enable();
+    tsl2572.enable();
+    lps22hb.enable();
+
     float value1, value2;
 
     hts221.get_temperature(&value1);
@@ -89,6 +68,10 @@ void print_sensor_data() {
     printf("DAVIS:   [drct] %d°,  [speed] %.2f km/h\r\n", anemometer.readWindDirection(), anemometer.readWindSpeed());
 
     printf("\r\n");
+
+    hts221.disable();
+    tsl2572.disable();
+    lps22hb.disable();
 }
 
 void test_blockdevice() {
@@ -124,9 +107,21 @@ int main() {
 
     test_blockdevice();
 
+    // Not used, then pull up to not draw power
+    pm25_tx.mode(PullUp);
+    pm25_rx.mode(PullUp);
+
+    // Add a PullUp to the unused pins
+    for (size_t ix = 0; ix < sizeof(unused) / sizeof(unused[0]); ix++) {
+        unused[ix].mode(PullUp);
+    }
+
     hts221.init(NULL);
     lps22hb.init(NULL);
     tsl2572.init();
+
+    led1 = LED_ON;
+    led2 = LED_ON;
 
     hts221.enable();
     lps22hb.enable();

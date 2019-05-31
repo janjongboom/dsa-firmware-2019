@@ -5,8 +5,7 @@
 #include "mbed_trace.h"
 #include "mbed_events.h"
 #include "LoRaWANInterface.h"
-#include "HTS221Sensor.h"
-#include "lora_radio_helper.h"
+#include "peripherals.h"
 
 static uint8_t DEV_EUI[] = { 0x00, 0x19, 0x0C, 0xDB, 0x47, 0x32, 0x64, 0xE0 };
 static uint8_t APP_EUI[] = { 0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x00, 0xEE, 0xBB };
@@ -14,12 +13,6 @@ static uint8_t APP_KEY[] = { 0x7C, 0x85, 0x17, 0xDB, 0x19, 0x2B, 0xD2, 0x14, 0xE
 
 // The port we're sending and receiving on
 #define MBED_CONF_LORA_APP_PORT     15
-
-// Peripherals (LoRa radio, temperature sensor and button)
-static InterruptIn btn1(PD_8);
-static DigitalOut led1(PA_5, 1);
-static DevI2C dev_i2c(PB_9, PB_8);
-static HTS221Sensor hts221(&dev_i2c);
 
 // EventQueue is required to dispatch events around
 static EventQueue ev_queue;
@@ -60,6 +53,8 @@ static void print_stats() {
 
 // Send a message over LoRaWAN
 static void send_message() {
+    hts221.enable();
+
     uint8_t tx_buffer[50] = { 0 };
 
     float value;
@@ -84,6 +79,8 @@ static void send_message() {
 
     printf("%d bytes scheduled for transmission\n", retcode);
     print_stats();
+
+    hts221.disable();
 }
 
 int main() {
@@ -97,9 +94,24 @@ int main() {
         return -1;
     }
 
-    // Fire a message when the button is pressed
-    ev_queue.call_every(10000, &send_message);
-    // btn1.fall(ev_queue.event(&send_message));
+    hts221.init(NULL);
+    hts221.disable();
+
+    lps22hb.init(NULL);
+    lps22hb.disable();
+
+    tsl2572.init();
+    tsl2572.disable();
+
+    // Not used, then pull up to not draw power
+    pm25_tx.mode(PullUp);
+    pm25_rx.mode(PullUp);
+
+    // Add a PullUp to the unused pins
+    for (size_t ix = 0; ix < sizeof(unused) / sizeof(unused[0]); ix++) {
+        unused[ix].mode(PullUp);
+    }
+
 
     // prepare application callbacks
     callbacks.events = mbed::callback(lora_event_handler);
@@ -166,9 +178,7 @@ static void lora_event_handler(lorawan_event_t event) {
     switch (event) {
         case CONNECTED:
             printf("Connection - Successful\n");
-
-            hts221.init(NULL);
-            hts221.enable();
+            ev_queue.call_every(10000, &send_message);
 
             break;
         case DISCONNECTED:
