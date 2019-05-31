@@ -5,6 +5,6 @@
 #define LORAWAN_TEST    2
 #define PM25_TEST       3
 
-#define APPLICATION     SENSOR_TEST
+#define APPLICATION     PM25_TEST
 
 #endif // SELECT_APP_H

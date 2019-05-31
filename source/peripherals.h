@@ -7,6 +7,7 @@
 #include "TSL2572Sensor.h"
 #include "SPIFBlockDevice.h"
 #include "DavisAnemometer.h"
+#include "PMS5003.h"
 #include "SX1276_LoRaRadio.h"
 
 #define LED_ON  0
@@ -29,15 +30,13 @@ static AnalogIn grove12_8(PA_3);   // marked as ADC12.8
 
 static DavisAnemometer anemometer(PA_1, PD_4);
 
-// Pull these down
-static DigitalIn pm25_tx(PA_2);
-static DigitalIn pm25_rx(PA_3);
+static PMS5003 pm25(PC_10, PC_11, PD_2);
 
 // Block device
 static SPIFBlockDevice bd(PB_5, PB_4, PB_3, PE_12);
 
 // Unused pins
-static DigitalIn unused[] = { PA_4, PA_7, PA_8, PA_11, PA_12, PB_6, PB_7, PC_0, PC_1, PC_2, PC_3, PC_4, PC_5, PC_6, PC_7, PC_8, PC_9, PC_13, PD_0, PD_2, PD_3, PD_5, PD_6, PD_7/*, PD_10 */, PD_11, PD_12, PD_13, PD_14, PD_15, PE_7, PE_8, PE_9, PE_10, PE_11, PE_13, PE_14, PE_15 };
+static DigitalIn unused[] = { PA_4, PA_7, PA_8, PA_11, PA_12, PB_6, PB_7, PC_0, PC_1, PC_2, PC_3, PC_4, PC_5, PC_6, PC_7, PC_8, PC_9, PC_13, PD_0, PD_3, PD_5, PD_6, PD_7/*, PD_10 */, PD_11, PD_12, PD_13, PD_14, PD_15, PE_7, PE_8, PE_9, PE_10, PE_11, PE_13, PE_14, PE_15 };
 
 static SX1276_LoRaRadio radio(PB_15,
                               PB_14,

@@ -2,10 +2,9 @@
 #if APPLICATION == PM25_TEST
 
 #include "mbed.h"
-#include "PMS5003.h"
+#include "peripherals.h"
 
 static EventQueue queue;
-static PMS5003 pm25(PA_2, PA_3, NC, &queue);
 
 void pm25_data_callback(pms5003_data_t data) {
     printf("---------------------------------------\n");
