@@ -7,7 +7,7 @@
 #include "LoRaWANInterface.h"
 #include "peripherals.h"
 
-static uint8_t DEV_EUI[] = { 0x00, 0x19, 0x0C, 0xDB, 0x47, 0x32, 0x64, 0xE0 };
+static uint8_t DEV_EUI[8] = { 0x00 };
 static uint8_t APP_EUI[] = { 0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x00, 0xEE, 0xBB };
 static uint8_t APP_KEY[] = { 0x7C, 0x85, 0x17, 0xDB, 0x19, 0x2B, 0xD2, 0x14, 0xE1, 0x16, 0xB9, 0x78, 0x46, 0x4D, 0xC1, 0xBA };
 
@@ -25,6 +25,9 @@ static lorawan_app_callbacks_t callbacks;
 
 // LoRaWAN stack event handler
 static void lora_event_handler(lorawan_event_t event);
+
+// Connecting LED... blink when connecting
+static int connect_blink_led_id = -1;
 
 static void print_stats() {
     // allocate enough room for every thread's stack statistics
@@ -49,6 +52,18 @@ static void print_stats() {
     printf("Deep Sleep: %llu\n", cpu_stats.deep_sleep_time / 1000);
 
     printf("\r\n");
+}
+
+static void led2_on() {
+    led2 = LED_ON;
+}
+
+static void led2_off() {
+    led2 = LED_OFF;
+}
+
+static void blink_led2() {
+    led2 = !led2;
 }
 
 // Send a message over LoRaWAN
@@ -83,11 +98,41 @@ static void send_message() {
     hts221.disable();
 }
 
-int main() {
-    printf("Press BUTTON1 to send the current value of the temperature sensor!\n");
+static void print_buffer(uint8_t *buffer, size_t size) {
+    for (size_t ix = 0; ix < size; ix++) {
+        printf("%02x", buffer[ix]);
+    }
+}
 
-    // Enable trace output for this demo, so we can see what the LoRaWAN stack does
+int main() {
+    // Enable trace output so we can see what the LoRaWAN stack does
     mbed_trace_init();
+
+    // Calculate DevEUI, need to check if this is in the self-assignment range...
+    uint32_t w1 = HAL_GetUIDw0();
+    uint32_t w2 = HAL_GetUIDw1();
+    uint32_t w3 = HAL_GetUIDw2();
+
+    w1 += w3;
+
+    // keep DEV_EUI[0] to 0x0 => local range
+    DEV_EUI[1] = w2 >> 16 & 0xff;
+    DEV_EUI[2] = w2 >> 8 & 0xff;
+    DEV_EUI[3] = w2 >> 0 & 0xff;
+    DEV_EUI[4] = w1 >> 24 & 0xff;
+    DEV_EUI[5] = w1 >> 16 & 0xff;
+    DEV_EUI[6] = w1 >> 8 & 0xff;
+    DEV_EUI[7] = w1 >> 0 & 0xff;
+
+    printf("Data Science Africa 2019\n");
+    printf("DevEUI:        ");
+    print_buffer(DEV_EUI, sizeof(DEV_EUI));
+    printf("\nAppEUI:        ");
+    print_buffer(APP_EUI, sizeof(APP_EUI));
+    printf("\nAppKey:        ");
+    print_buffer(APP_KEY, sizeof(APP_KEY));
+    printf("\n\n");
+
 
     if (lorawan.initialize(&ev_queue) != LORAWAN_STATUS_OK) {
         printf("LoRa initialization failed!\n");
@@ -103,27 +148,25 @@ int main() {
     tsl2572.init();
     tsl2572.disable();
 
-    // Not used, then pull up to not draw power
-    pm25_tx.mode(PullUp);
-    pm25_rx.mode(PullUp);
-
     // Add a PullUp to the unused pins
     for (size_t ix = 0; ix < sizeof(unused) / sizeof(unused[0]); ix++) {
         unused[ix].mode(PullUp);
     }
 
+    // This way we can check if device is on
+    btn2.fall(&led2_on);
+    btn2.rise(&led2_off);
 
     // prepare application callbacks
     callbacks.events = mbed::callback(lora_event_handler);
     lorawan.add_app_callbacks(&callbacks);
 
-    // Disable adaptive data rating
-    if (lorawan.disable_adaptive_datarate() != LORAWAN_STATUS_OK) {
-        printf("disable_adaptive_datarate failed!\n");
+    // Enable adaptive data rating
+    if (lorawan.enable_adaptive_datarate() != LORAWAN_STATUS_OK) {
+        printf("enable_adaptive_datarate failed!\n");
         return -1;
     }
 
-    lorawan.set_datarate(5); // SF7BW125
     lorawan.set_device_class(CLASS_A);
 
     lorawan_connect_t connect_params;
@@ -144,6 +187,9 @@ int main() {
     }
 
     printf("Connection - In Progress ...\r\n");
+
+    // Blink until device is connected
+    connect_blink_led_id = ev_queue.call_every(1000, &blink_led2);
 
     // make your event queue dispatching events forever
     ev_queue.dispatch_forever();
@@ -180,6 +226,8 @@ static void lora_event_handler(lorawan_event_t event) {
             printf("Connection - Successful\n");
             ev_queue.call_every(10000, &send_message);
 
+            ev_queue.cancel(connect_blink_led_id);
+
             break;
         case DISCONNECTED:
             ev_queue.break_dispatch();
@@ -206,9 +254,11 @@ static void lora_event_handler(lorawan_event_t event) {
             break;
         case JOIN_FAILURE:
             printf("OTAA Failed - Check Keys\n");
+            NVIC_SystemReset();
             break;
         default:
-            MBED_ASSERT("Unknown Event");
+            printf("Unknown Event\n");
+            NVIC_SystemReset();
             break;
     }
 }
