@@ -6,6 +6,10 @@
 #include "mbed_events.h"
 #include "LoRaWANInterface.h"
 #include "peripherals.h"
+#include "CayenneLPP.h"
+
+#define HAS_ANEMOMETER      1
+#define HAS_PM25            1
 
 static uint8_t DEV_EUI[8] = { 0x00 };
 static uint8_t APP_EUI[] = { 0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x00, 0xEE, 0xBB };
@@ -68,22 +72,58 @@ static void blink_led2() {
 
 // Send a message over LoRaWAN
 static void send_message() {
+#if HAS_ANEMOMETER == 1
+    anemometer.enable();
+    anemometer.readWindSpeed(); // reset sampling time
+    wait_ms(3000); // OK, now we should have an accurate idea
+#endif
+
     hts221.enable();
+    tsl2572.enable();
+    lps22hb.enable();
 
-    uint8_t tx_buffer[50] = { 0 };
+    CayenneLPP lpp(50);
 
-    float value;
-    hts221.get_temperature(&value);
+    float value1, value2;
 
-    // Sending strings over LoRaWAN is not recommended
-    sprintf((char*) tx_buffer, "Temperature = %.2f",
-                                   value);
+    hts221.get_temperature(&value1);
+    hts221.get_humidity(&value2);
+    printf("HTS221:  [temp] %.2f C, [hum]   %.2f%%\r\n", value1, value2);
+    lpp.addTemperature(1, value1);
+    lpp.addRelativeHumidity(2, value2);
 
-    int packet_len = strlen((char*) tx_buffer);
+    value1 = value2 = 0;
+    lps22hb.get_temperature(&value1);
+    lps22hb.get_pressure(&value2);
+    printf("LPS22HB: [temp] %.2f C, [press] %.2f mbar\r\n", value1, value2);
+    lpp.addTemperature(3, value1);
+    lpp.addBarometricPressure(4, value2);
 
-    printf("Sending %d bytes: \"%s\"\n", packet_len, tx_buffer);
+    tsl2572.read_ambient_light(&value1);
+    printf("TSL2572: [lght] %.2f lux\r\n", value1);
+    lpp.addLuminosity(5, static_cast<uint16_t>(value1)); // should be fine.. range is 0..60000 according to datasheet
 
-    int16_t retcode = lorawan.send(MBED_CONF_LORA_APP_PORT, tx_buffer, packet_len, MSG_UNCONFIRMED_FLAG);
+    printf("GROVE.7: [anlg] %.2f\r\n", grove12_7.read());
+    printf("GROVE.8: [anlg] %.2f\r\n", grove12_8.read());
+    lpp.addAnalogOutput(6, grove12_7.read());
+    lpp.addAnalogOutput(7, grove12_8.read());
+
+#if HAS_ANEMOMETER == 1
+    printf("DAVIS:   [drct] %d°,  [speed] %.2f km/h\r\n", anemometer.readWindDirection(), anemometer.readWindSpeed());
+    lpp.addAnalogOutput(8, anemometer.readWindDirection());
+    lpp.addAnalogOutput(9, anemometer.readWindSpeed());
+    anemometer.disable();
+#endif
+
+    printf("\r\n");
+
+    hts221.disable();
+    tsl2572.disable();
+    lps22hb.disable();
+
+    printf("Sending %d bytes\n", lpp.getSize());
+
+    int16_t retcode = lorawan.send(MBED_CONF_LORA_APP_PORT, lpp.getBuffer(), lpp.getSize(), MSG_UNCONFIRMED_FLAG);
 
     // for some reason send() returns -1... I cannot find out why, the stack returns the right number. I feel that this is some weird Emscripten quirk
     if (retcode < 0) {
@@ -147,6 +187,10 @@ int main() {
 
     tsl2572.init();
     tsl2572.disable();
+
+#if HAS_PM25 == 1
+    // todo
+#endif
 
     // Add a PullUp to the unused pins
     for (size_t ix = 0; ix < sizeof(unused) / sizeof(unused[0]); ix++) {
