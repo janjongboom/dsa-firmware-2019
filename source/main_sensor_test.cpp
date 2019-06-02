@@ -107,10 +107,6 @@ int main() {
 
     test_blockdevice();
 
-    // Not used, then pull up to not draw power
-    pm25_tx.mode(PullUp);
-    pm25_rx.mode(PullUp);
-
     // Add a PullUp to the unused pins
     for (size_t ix = 0; ix < sizeof(unused) / sizeof(unused[0]); ix++) {
         unused[ix].mode(PullUp);

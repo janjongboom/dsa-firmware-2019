@@ -8,15 +8,33 @@
 #include "peripherals.h"
 #include "CayenneLPP.h"
 
-#define HAS_ANEMOMETER      1
-#define HAS_PM25            1
+#define DSA_MODE_ENVIRONMENTAL 1
+#define DSA_MODE_WIND          2
+#define DSA_MODE_PM25          3
+
+#define DSA_MODE                DSA_MODE_WIND
+
+#if DSA_MODE == DSA_MODE_ENVIRONMENTAL
+#define PAUSE_BEFORE_SENDING        (10 * 60 * 1000) // 10 minutes
+
+#elif DSA_MODE == DSA_MODE_WIND
+#define PAUSE_BEFORE_SENDING        (10 * 60 * 1000) // 10 minutes
+#define ANEMOMETER_SAMPLING_TIME    3000 // 3 seconds
+
+#elif DSA_MODE == DSA_MODE_PM25
+#define PAUSE_BEFORE_SENDING        (57 * 60 * 1000) // 57 minutes
+#define PM25_SAMPLING_TIME          3 * 60 * 1000 // 3 minutes
+
+#else
+#error "No mode selected!"
+#endif // DSA_MODE
+
+// The port we're sending and receiving on
+#define MBED_CONF_LORA_APP_PORT     15
 
 static uint8_t DEV_EUI[8] = { 0x00 };
 static uint8_t APP_EUI[] = { 0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x00, 0xEE, 0xBB };
 static uint8_t APP_KEY[] = { 0x7C, 0x85, 0x17, 0xDB, 0x19, 0x2B, 0xD2, 0x14, 0xE1, 0x16, 0xB9, 0x78, 0x46, 0x4D, 0xC1, 0xBA };
-
-// The port we're sending and receiving on
-#define MBED_CONF_LORA_APP_PORT     15
 
 // EventQueue is required to dispatch events around
 static EventQueue ev_queue;
@@ -32,6 +50,11 @@ static void lora_event_handler(lorawan_event_t event);
 
 // Connecting LED... blink when connecting
 static int connect_blink_led_id = -1;
+static int next_message_id = -1;
+
+static uint16_t times_since_last_success_tx = 0;
+
+static pms5003_data_t last_pm5003_data;
 
 static void print_stats() {
     // allocate enough room for every thread's stack statistics
@@ -70,17 +93,56 @@ static void blink_led2() {
     led2 = !led2;
 }
 
+#if DSA_MODE == DSA_MODE_PM25
+static void pm25_data_callback(pms5003_data_t data) {
+    last_pm5003_data = data;
+}
+#endif
+
 // Send a message over LoRaWAN
 static void send_message() {
-#if HAS_ANEMOMETER == 1
+#if DSA_MODE == DSA_MODE_WIND
+    printf("Sampling anemometer for %d ms.\n", ANEMOMETER_SAMPLING_TIME);
     anemometer.enable();
     anemometer.readWindSpeed(); // reset sampling time
-    wait_ms(3000); // OK, now we should have an accurate idea
+    wait_ms(ANEMOMETER_SAMPLING_TIME); // OK, now we should have an accurate idea
+    float windSpeedValue = anemometer.readWindSpeed();
+    uint16_t windSpeedDirection = anemometer.readWindDirection();
+    anemometer.disable();
+#endif
+
+#if DSA_MODE == DSA_MODE_PM25
+    printf("Sampling PM2.5 sensor for %d ms.\n", PM25_SAMPLING_TIME);
+    pm25.enable(&pm25_data_callback);
+    wait_ms(PM25_SAMPLING_TIME); // this will yield interrupts
+    pm25.disable(); // disable, we have cached the result already now
+
+    // Print debug info now
+    printf("---------------------------------------\n");
+    printf("Concentration Units (standard)\n");
+    printf("PM 1.0: %u", last_pm5003_data.pm10_standard);
+    printf("\t\tPM 2.5: %u", last_pm5003_data.pm25_standard);
+    printf("\t\tPM 10: %u\n", last_pm5003_data.pm100_standard);
+    printf("---------------------------------------\n");
+    printf("Concentration Units (environmental)\n");
+    printf("PM 1.0: %u", last_pm5003_data.pm10_env);
+    printf("\t\tPM 2.5: %u", last_pm5003_data.pm25_env);
+    printf("\t\tPM 10: %u\n", last_pm5003_data.pm100_env);
+    printf("---------------------------------------\n");
+    printf("Particles > 0.3um / 0.1L air: %u\n", last_pm5003_data.particles_03um);
+    printf("Particles > 0.5um / 0.1L air: %u\n", last_pm5003_data.particles_05um);
+    printf("Particles > 1.0um / 0.1L air: %u\n", last_pm5003_data.particles_10um);
+    printf("Particles > 2.5um / 0.1L air: %u\n", last_pm5003_data.particles_25um);
+    printf("Particles > 5.0um / 0.1L air: %u\n", last_pm5003_data.particles_50um);
+    printf("Particles > 10.0 um / 0.1L air: %u\n", last_pm5003_data.particles_100um);
+    printf("---------------------------------------\n");
 #endif
 
     hts221.enable();
     tsl2572.enable();
     lps22hb.enable();
+
+    wait_ms(500); // give sensors some time to warm up
 
     CayenneLPP lpp(50);
 
@@ -108,10 +170,10 @@ static void send_message() {
     lpp.addAnalogOutput(6, grove12_7.read());
     lpp.addAnalogOutput(7, grove12_8.read());
 
-#if HAS_ANEMOMETER == 1
+#if DSA_MODE == DSA_MODE_WIND
     printf("DAVIS:   [drct] %d°,  [speed] %.2f km/h\r\n", anemometer.readWindDirection(), anemometer.readWindSpeed());
-    lpp.addAnalogOutput(8, anemometer.readWindDirection());
-    lpp.addAnalogOutput(9, anemometer.readWindSpeed());
+    lpp.addAnalogOutput(8, static_cast<float>(anemometer.readWindDirection()));
+    // lpp.addAnalogOutput(9, anemometer.readWindSpeed());
     anemometer.disable();
 #endif
 
@@ -121,27 +183,55 @@ static void send_message() {
     tsl2572.disable();
     lps22hb.disable();
 
+#if HAS_PM25 == 1
+    uint8_t *buffer = (uint8_t*)malloc(lpp.getSize() + sizeof(pms5003_data_t));
+    memcpy(buffer, lpp.getBuffer(), lpp.getSize());
+    memcpy(buffer + lpp.getSize(), &last_pm5003_data, sizeof(pms5003_data_t));
+    printf("Sending %d bytes\n", lpp.getSize() + sizeof(pms5003_data_t));
+    int16_t retcode = lorawan.send(MBED_CONF_LORA_APP_PORT, buffer, lpp.getSize() + sizeof(pms5003_data_t), MSG_UNCONFIRMED_FLAG);
+#else
     printf("Sending %d bytes\n", lpp.getSize());
-
     int16_t retcode = lorawan.send(MBED_CONF_LORA_APP_PORT, lpp.getBuffer(), lpp.getSize(), MSG_UNCONFIRMED_FLAG);
+#endif
 
     // for some reason send() returns -1... I cannot find out why, the stack returns the right number. I feel that this is some weird Emscripten quirk
     if (retcode < 0) {
         retcode == LORAWAN_STATUS_WOULD_BLOCK ? printf("send - duty cycle violation\n")
                 : printf("send() - Error code %d\n", retcode);
+        times_since_last_success_tx++;
+        if (times_since_last_success_tx >= 10) {
+            printf("Failed to transmit 10 times... Resetting system\n");
+            NVIC_SystemReset();
+        }
+
+        next_message_id = ev_queue.call_in(PAUSE_BEFORE_SENDING , &send_message);
         return;
     }
 
+    times_since_last_success_tx = 0;
+
     printf("%d bytes scheduled for transmission\n", retcode);
     print_stats();
-
-    hts221.disable();
 }
 
 static void print_buffer(uint8_t *buffer, size_t size) {
     for (size_t ix = 0; ix < size; ix++) {
         printf("%02x", buffer[ix]);
     }
+}
+
+static void send_message_manually() {
+    // todo: add some debounce?
+    led1 = LED_ON;
+
+    // cancel next message
+    ev_queue.cancel(next_message_id);
+
+    // send new next message, which will trigger new next message
+    send_message();
+
+    // turn LED off again
+    led1 = LED_OFF;
 }
 
 int main() {
@@ -186,11 +276,8 @@ int main() {
     lps22hb.disable();
 
     tsl2572.init();
+    tsl2572.enable();
     tsl2572.disable();
-
-#if HAS_PM25 == 1
-    // todo
-#endif
 
     // Add a PullUp to the unused pins
     for (size_t ix = 0; ix < sizeof(unused) / sizeof(unused[0]); ix++) {
@@ -200,6 +287,9 @@ int main() {
     // This way we can check if device is on
     btn2.fall(&led2_on);
     btn2.rise(&led2_off);
+
+    // btn1 pressing can be used to trigger manual message
+    btn1.fall(ev_queue.event(&send_message_manually));
 
     // prepare application callbacks
     callbacks.events = mbed::callback(lora_event_handler);
@@ -268,9 +358,11 @@ static void lora_event_handler(lorawan_event_t event) {
     switch (event) {
         case CONNECTED:
             printf("Connection - Successful\n");
-            ev_queue.call_every(10000, &send_message);
+
+            send_message();
 
             ev_queue.cancel(connect_blink_led_id);
+            led2 = LED_OFF;
 
             break;
         case DISCONNECTED:
@@ -280,6 +372,7 @@ static void lora_event_handler(lorawan_event_t event) {
         case TX_DONE:
         {
             printf("Message Sent to Network Server\n");
+            next_message_id = ev_queue.call_in(PAUSE_BEFORE_SENDING , &send_message);
             break;
         }
         case TX_TIMEOUT:
@@ -287,6 +380,7 @@ static void lora_event_handler(lorawan_event_t event) {
         case TX_CRYPTO_ERROR:
         case TX_SCHEDULING_ERROR:
             printf("Transmission Error - EventCode = %d\n", event);
+            next_message_id = ev_queue.call_in(PAUSE_BEFORE_SENDING , &send_message);
             break;
         case RX_DONE:
             printf("Received message from Network Server\n");
