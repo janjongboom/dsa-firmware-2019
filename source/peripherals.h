@@ -28,7 +28,8 @@ static TSL2572Sensor tsl2572(PB_9, PB_8);
 static AnalogIn grove12_7(PA_2);   // marked as ADC12.7
 static AnalogIn grove12_8(PA_3);   // marked as ADC12.8
 
-static DavisAnemometer anemometer(PA_1, PD_4);
+static AnalogIn wind_direction(PA_1);
+static DigitalIn wind_speed(PD_4);
 
 static PMS5003 pm25(PC_10, PC_11, PD_2);
 

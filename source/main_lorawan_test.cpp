@@ -12,7 +12,7 @@
 #define DSA_MODE_WIND          2
 #define DSA_MODE_PM25          3
 
-#define DSA_MODE                DSA_MODE_WIND
+#define DSA_MODE                DSA_MODE_ENVIRONMENTAL
 
 #if DSA_MODE == DSA_MODE_ENVIRONMENTAL
 #define PAUSE_BEFORE_SENDING        (1 * 60 * 1000) // 10 minutes
@@ -60,13 +60,6 @@ static lorawan_app_callbacks_t callbacks;
 // LoRaWAN stack event handler
 static void lora_event_handler(lorawan_event_t event);
 
-// no idea wtf is happening here
-#if DSA_MODE == DSA_MODE_WIND
-Thread realtimeThread(osPriorityRealtime);
-EventQueue realtimeQueue;
-static InterruptIn wind(PD_4);
-#endif
-
 // Connecting LED... blink when connecting
 static int connect_blink_led_id = -1;
 static int next_message_id = -1;
@@ -112,8 +105,9 @@ static void blink_led2() {
     led2 = !led2;
 }
 
+static uint16_t wind_count = 0;
 static void wind_fall() {
-    anemometer.handleIrq();
+    wind_count++;
 }
 
 #if DSA_MODE == DSA_MODE_PM25
@@ -126,16 +120,34 @@ static void pm25_data_callback(pms5003_data_t data) {
 static void send_message() {
 #if DSA_MODE == DSA_MODE_WIND
     printf("Sampling anemometer for %d ms.\n", ANEMOMETER_SAMPLING_TIME);
-    realtimeThread.start(callback(&realtimeQueue, &EventQueue::dispatch_forever));
-    wind.fall(&wind_fall);
-    anemometer.enable();
-    anemometer.readWindSpeed(); // reset sampling time
-    wait_ms(ANEMOMETER_SAMPLING_TIME); // OK, now we should have an accurate idea
-    float windSpeedValue = anemometer.readWindSpeed();
-    uint16_t windDirectionValue = anemometer.readWindDirection();
-    anemometer.disable();
-    wind.fall(NULL);
-    realtimeThread.terminate();
+
+    // The anemometer driver provides an interrupt driven approach which works fine normally
+    // However on the DSA board it seems that PD_4 has some conflict with the LoRaWAN radio
+    // and both cannot be declared at the same time (same extint controller perhaps?)
+    // Use sampling on the MCU instead...
+
+    int wind_count = 0;
+
+    LowPowerTimer timer;
+    timer.start();
+    bool last_state = wind_speed.read();
+    while (timer.read_ms() <= ANEMOMETER_SAMPLING_TIME) {
+        bool curr_state = wind_speed.read();
+
+        // detect falling edge
+        if (last_state == 1 && curr_state == 0) {
+            wind_count++;
+        }
+
+        last_state = curr_state;
+    }
+    timer.stop();
+
+    float timePassed = static_cast<float>(timer.read_ms()) / 1000.0f;
+    float windSpeedValue = static_cast<float>(wind_count) * (2.25f / timePassed) * 1.609f;
+
+    float windDirection = wind_direction.read() * 360.0f;
+    uint16_t windDirectionValue = static_cast<uint16_t>(windDirection);
 #endif
 
 #if DSA_MODE == DSA_MODE_PM25
@@ -169,7 +181,9 @@ static void send_message() {
     tsl2572.enable();
     lps22hb.enable();
 
+    sleep_manager_lock_deep_sleep();
     wait_ms(500); // give sensors some time to warm up
+    sleep_manager_unlock_deep_sleep();
 
     CayenneLPP lpp(50);
 
@@ -192,14 +206,16 @@ static void send_message() {
     printf("TSL2572: [lght] %.2f lux\r\n", value1);
     lpp.addLuminosity(5, static_cast<uint16_t>(value1)); // should be fine.. range is 0..60000 according to datasheet
 
+#if DSA_MODE == DSA_MODE_ENVIRONMENTAL
     printf("GROVE.7: [anlg] %.2f\r\n", grove12_7.read());
     printf("GROVE.8: [anlg] %.2f\r\n", grove12_8.read());
     lpp.addAnalogOutput(6, grove12_7.read());
     lpp.addAnalogOutput(7, grove12_8.read());
+#endif
 
 #if DSA_MODE == DSA_MODE_WIND
     printf("DAVIS:   [drct] %d°,  [speed] %.2f km/h\r\n", windDirectionValue, windSpeedValue);
-    lpp.addAnalogOutput(8, static_cast<float>(windDirectionValue));
+    lpp.addAnalogOutput(8, static_cast<float>(windDirectionValue) / 10.0f);
     lpp.addAnalogOutput(9, windSpeedValue);
 #endif
 
@@ -235,6 +251,8 @@ static void send_message() {
     }
 
     times_since_last_success_tx = 0;
+
+    sleep_manager_lock_deep_sleep();
 
     printf("%d bytes scheduled for transmission\n", retcode);
     print_stats();
