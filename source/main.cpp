@@ -15,38 +15,26 @@
 #define DSA_MODE                DSA_MODE_WIND
 
 #if DSA_MODE == DSA_MODE_ENVIRONMENTAL
-#define PAUSE_BEFORE_SENDING        (10 * 60 * 1000) // 10 minutes
+#define PAUSE_BEFORE_SENDING        (5 * 60 * 1000) // 5 minutes
 
 #elif DSA_MODE == DSA_MODE_WIND
-#define PAUSE_BEFORE_SENDING        (1 * 60 * 1000) // 10 minutes
-#define ANEMOMETER_SAMPLING_TIME    3000 // 3 seconds
+#define PAUSE_BEFORE_SENDING        (5 * 60 * 1000) // 5 minutes
+#define ANEMOMETER_SAMPLING_TIME    4500 // two sample periods (2.25 seconds is one)
 
 #elif DSA_MODE == DSA_MODE_PM25
-#define PAUSE_BEFORE_SENDING        (57 * 60 * 1000) // 57 minutes
+#define PAUSE_BEFORE_SENDING        (27 * 60 * 1000) // 27 minutes
 #define PM25_SAMPLING_TIME          3 * 60 * 1000 // 3 minutes
 
 #else
 #error "No mode selected!"
 #endif // DSA_MODE
 
-#define LORA_MODE_ABP            1
-#define LORA_MODE_OTAA           2
-#define LORA_MODE                LORA_MODE_OTAA
-
-
 // The port we're sending and receiving on
 #define MBED_CONF_LORA_APP_PORT     15
 
-#if LORA_MODE == LORA_MODE_OTAA
 static uint8_t DEV_EUI[8] = { 0x00 };
 static uint8_t APP_EUI[] = { 0x70, 0xB3, 0xD5, 0x7E, 0xD0, 0x00, 0xEE, 0xBB };
 static uint8_t APP_KEY[] = { 0x7C, 0x85, 0x17, 0xDB, 0x19, 0x2B, 0xD2, 0x14, 0xE1, 0x16, 0xB9, 0x78, 0x46, 0x4D, 0xC1, 0xBA };
-#elif LORA_MODE == LORA_MODE_ABP
-static uint32_t DEV_ADDR = 0x0;
-static uint8_t NWK_S_KEY[] = { 0x6B, 0xB3, 0x35, 0x5D, 0x1C, 0x42, 0xCB, 0xAE, 0x9A, 0xEE, 0xE0, 0x25, 0x39, 0xC4, 0x19, 0xF6 };
-static uint8_t APP_S_KEY[] = { 0x13, 0x8B, 0x29, 0x0F, 0xFC, 0x0C, 0x31, 0x1C, 0x98, 0x59, 0x1C, 0x70, 0x8E, 0xFE, 0xDD, 0x6A };
-static uint8_t NET_ID = 0x13; // TTN NetID, don't need to change
-#endif
 
 // EventQueue is required to dispatch events around
 static EventQueue ev_queue;
@@ -289,7 +277,6 @@ int main() {
 
     w1 += w3;
 
-#if LORA_MODE == LORA_MODE_OTAA
     // keep DEV_EUI[0] to 0x0 => local range
     DEV_EUI[1] = w2 >> 16 & 0xff;
     DEV_EUI[2] = w2 >> 8 & 0xff;
@@ -298,15 +285,9 @@ int main() {
     DEV_EUI[5] = w1 >> 16 & 0xff;
     DEV_EUI[6] = w1 >> 8 & 0xff;
     DEV_EUI[7] = w1 >> 0 & 0xff;
-#elif LORA_MODE == LORA_MODE_ABP
-    DEV_ADDR = w1 & 0xffffff; // keep lowest three bytes, first one needs to be 0x00
-#else
-    #error "No LoRa mode set"
-#endif
 
     printf("Data Science Africa 2019\n");
 
-#if LORA_MODE == LORA_MODE_OTAA
     printf("DevEUI:        ");
     print_buffer(DEV_EUI, sizeof(DEV_EUI));
     printf("\nAppEUI:        ");
@@ -314,14 +295,6 @@ int main() {
     printf("\nAppKey:        ");
     print_buffer(APP_KEY, sizeof(APP_KEY));
     printf("\n\n");
-#elif LORA_MODE == LORA_MODE_ABP
-    printf("DevAddr:         0x%08x\n", DEV_ADDR);
-    printf("NwkSKey:         ");
-    print_buffer(NWK_S_KEY, sizeof(NWK_S_KEY));
-    printf("\nAppSKey:         ");
-    print_buffer(APP_S_KEY, sizeof(APP_S_KEY));
-    printf("\nNetID:           0x%02x\n\n", NET_ID);
-#endif
 
 
     if (lorawan.initialize(&ev_queue) != LORAWAN_STATUS_OK) {
@@ -357,7 +330,6 @@ int main() {
 
     lorawan.set_device_class(CLASS_A);
 
-#if LORA_MODE == LORA_MODE_OTAA
     // Enable adaptive data rating
     if (lorawan.enable_adaptive_datarate() != LORAWAN_STATUS_OK) {
         printf("enable_adaptive_datarate failed!\n");
@@ -371,25 +343,6 @@ int main() {
     connect_params.connection_u.otaa.app_eui = APP_EUI;
     connect_params.connection_u.otaa.app_key = APP_KEY;
     connect_params.connection_u.otaa.nb_trials = 3;
-
-#elif LORA_MODE == LORA_MODE_ABP
-    // Disable adaptive data rating
-    if (lorawan.disable_adaptive_datarate() != LORAWAN_STATUS_OK) {
-        printf("disable_adaptive_datarate failed!\n");
-        return -1;
-    }
-
-    lorawan.set_datarate(2); // SF10BW125
-    lorawan_connect_t connect_params;
-    connect_params.connect_type = LORAWAN_CONNECTION_ABP;
-    connect_params.connection_u.abp.nwk_id = NET_ID;
-    connect_params.connection_u.abp.dev_addr = DEV_ADDR;
-    connect_params.connection_u.abp.nwk_skey = NWK_S_KEY;
-    connect_params.connection_u.abp.app_skey = APP_S_KEY;
-
-#else
-    #error "LORA_MODE not set"
-#endif
 
     lorawan_status_t retcode = lorawan.connect(connect_params);
 
