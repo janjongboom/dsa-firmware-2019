@@ -12,10 +12,10 @@
 #define DSA_MODE_WIND          2
 #define DSA_MODE_PM25          3
 
-#define DSA_MODE                DSA_MODE_ENVIRONMENTAL
+#define DSA_MODE                DSA_MODE_WIND
 
 #if DSA_MODE == DSA_MODE_ENVIRONMENTAL
-#define PAUSE_BEFORE_SENDING        (1 * 60 * 1000) // 10 minutes
+#define PAUSE_BEFORE_SENDING        (10 * 60 * 1000) // 10 minutes
 
 #elif DSA_MODE == DSA_MODE_WIND
 #define PAUSE_BEFORE_SENDING        (1 * 60 * 1000) // 10 minutes
