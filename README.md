@@ -20,6 +20,10 @@ The board contains:
 
 This was designed for Data Science Africa 2019 by Chris Styles (Arm). It's not for sale, but the design files are open source and available under the [Mbed HDK](https://github.com/ARMmbed/mbed-HDK-Eagle-Projects).
 
+### PM2.5 Fix
+
+There is a design error in the development boards, where the power gate for the PM2.5 connector is not connected to any pin. This is fixed in a number of boards, all which have a PM2.5 fix post-it in their packaging. Alternatively, you can verify this by checking if there's a fly-wire from a capacitor near the connector to a pin on the MCU ([picture](img/flywire.jpg)). You can fix this yourself as well, by connecting the capacitor to pin PD_2.
+
 ## Programming the board
 
 To program the board you'll need an STLink or a NUCLEO board, a Cortex-M debug cable, and an FTDI cable. Connect it like this:
